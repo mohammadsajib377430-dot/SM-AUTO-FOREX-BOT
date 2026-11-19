@@ -45,6 +45,14 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 </div>
 </section>
 <section class="card">
+<strong>NEXT 1-MINUTE CANDLE FORECAST</strong>
+<div class="small muted">Prediction for the next M1 candle, based on the latest completed market data.</div>
+<div id="forecastSignal" class="signal wait">WAIT</div>
+<div id="forecastTarget" class="muted">Target candle closes at: —</div>
+<div id="forecastSummary" class="small muted">Waiting for fresh market data…</div>
+<div class="notice warning" style="margin-top:10px">Forecast only — not a guaranteed result or a probability. Confirm the candle timing and market conditions before any trade.</div>
+</section>
+<section class="card">
 <strong>Indicator details</strong>
 <div class="row"><span class="muted">EMA 9</span><strong id="ema9">—</strong></div>
 <div class="row"><span class="muted">EMA 21</span><strong id="ema21">—</strong></div>
@@ -169,7 +177,29 @@ async function fetchAnalysis(symbol,key){
   sl:signal==="BUY"?last-range:signal==="SELL"?last+range:NaN,
   tp:signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN};
 }
+function updateForecast(r){
+ const el=$("forecastSignal"),target=$("forecastTarget"),summary=$("forecastSummary");
+ const raw=String(r.candle||"");
+ const d=new Date(raw.replace(" ","T")+"Z");
+ if(!Number.isFinite(d.getTime())){
+  el.textContent="WAIT";el.className="signal wait";
+  target.textContent="Target candle closes at: —";
+  summary.textContent="Candle timestamp unavailable; no forecast shown.";
+  return;
+ }
+ // Twelve Data timestamps identify the candle's opening time.
+ // The next M1 candle opens one minute later and closes two minutes after the last candle opened.
+ const targetClose=new Date(d.getTime()+120000);
+ const targetLabel=formatBDTime(targetClose.toISOString().slice(0,19).replace("T"," "));
+ const forecast=r.signal;
+ el.textContent=forecast;el.className="signal "+forecast.toLowerCase();
+ target.textContent="Target candle closes at: "+targetLabel+" (BDT)";
+ summary.textContent=forecast==="WAIT"
+  ?"Mixed indicator conditions — no clear direction for the next candle."
+  :(forecast==="BUY"?"Possible bullish direction for the next candle.":"Possible bearish direction for the next candle.")+" · "+r.strength+"% rule score";
+}
 function updateDetail(r){
+ updateForecast(r);
  $("signal").textContent=r.signal;$("signal").className="signal "+r.signal.toLowerCase();
  $("summary").textContent=r.signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(r.signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
  $("price").textContent=r.price;$("candle").textContent=r.candleDisplay;
