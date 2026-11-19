@@ -25,6 +25,11 @@ class ScreenCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            stopSelf()
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
@@ -40,6 +45,7 @@ class ScreenCaptureService : Service() {
 
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = manager.getMediaProjection(resultCode, resultData)
+        projection?.registerCallback(projectionCallback, android.os.Handler(mainLooper))
         startFrameCapture()
         return START_NOT_STICKY
     }
