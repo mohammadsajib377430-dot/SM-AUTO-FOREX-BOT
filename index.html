@@ -143,7 +143,7 @@ function ema(values,period){const k=2/(period+1);let v=values[0];for(let i=1;i<v
 function rsi(values,p=14){let gain=0,loss=0;for(let i=values.length-p;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)gain+=d;else loss-=d}const ag=gain/p,al=loss/p;return al===0?100:100-100/(1+ag/al)}
 function macd(values){const fast=ema(values.slice(-60),12),slow=ema(values.slice(-60),26);return fast-slow}
 async function fetchAnalysis(symbol,key){
- const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&apikey="+encodeURIComponent(key);
+ const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&timezone=UTC&apikey="+encodeURIComponent(key);
  const res=await fetch(url);const data=await res.json();
  if(!res.ok||data.status==="error"||!data.values)throw new Error(data.message||"Market data unavailable");
  const bars=data.values.slice().reverse(),closes=bars.map(x=>Number(x.close)).filter(Number.isFinite);
