@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#071b36">
+<title>SM AUTO FOREX BOT — M1 Signals</title>
+<style>
+:root{color-scheme:dark;--bg:#071426;--panel:#102642;--line:#244362;--text:#eef6ff;--muted:#9bb2ca;--blue:#39a5ff;--green:#20c997;--red:#ff6577;--amber:#ffc857}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#061326,#0c2d50);color:var(--text);font:15px system-ui,Arial,sans-serif;min-height:100vh}
+main{max-width:850px;margin:auto;padding:22px 14px 40px}.head{display:flex;align-items:center;gap:12px;margin-bottom:18px}.logo{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#168bff,#13c7a0);display:grid;place-items:center;font-weight:900;color:white;font-size:17px}.head h1{font-size:20px;margin:0}.head p{margin:3px 0 0;color:var(--muted);font-size:12px}
+.card{background:rgba(16,38,66,.94);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 8px 28px #0002}
+label{display:block;color:var(--muted);font-size:12px;margin:0 0 7px}input,select,button{font:inherit;border-radius:10px;border:1px solid var(--line);padding:12px;background:#081a30;color:var(--text);width:100%}
+button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:700;cursor:pointer;margin-top:12px}button:disabled{opacity:.55}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.signal{font-size:34px;font-weight:900;letter-spacing:1px}.buy{color:var(--green)}.sell{color:var(--red)}.wait{color:var(--amber)}
+.muted{color:var(--muted)}.small{font-size:12px}.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #ffffff12}.row:last-child{border:0}.status{font-size:12px;color:var(--muted);margin-top:10px;overflow-wrap:anywhere}
+.notice{font-size:12px;line-height:1.55;color:#c6d7e9}.warning{color:var(--amber)}.positive{color:var(--green)}.negative{color:var(--red)}
+@media(max-width:520px){main{padding:16px 11px 30px}.grid{grid-template-columns:1fr}.card{padding:14px}}
+</style>
+</head>
+<body><main>
+<header class="head"><div class="logo">SM</div><div><h1>SM AUTO FOREX BOT</h1><p>REAL-MARKET DATA · 1-MINUTE TECHNICAL SIGNALS</p></div></header>
+<section class="card">
+<div class="grid">
+<div><label for="symbol">Trading pair</label><select id="symbol"><option>EUR/USD</option><option>GBP/USD</option><option>USD/JPY</option><option>XAU/USD</option></select></div>
+<div><label for="key">Twelve Data API key</label><input id="key" type="password" autocomplete="off" placeholder="Paste your own API key"></div>
+</div>
+<button id="analyze">Fetch market data & analyse</button>
+<div class="status" id="status">Enter your API key, choose a pair, then press the button.</div>
+<p class="notice">Your API key is used in this browser session to request market data. Do not share it publicly or commit it to GitHub. This page does not save the key or place trades.</p>
+</section>
+<section class="card">
+<div class="small muted">LATEST M1 TECHNICAL SIGNAL</div>
+<div id="signal" class="signal wait">WAIT</div>
+<div id="summary" class="muted">Waiting for market data…</div>
+<div class="grid" style="margin-top:14px">
+<div><div class="small muted">Latest close</div><strong id="price">—</strong></div>
+<div><div class="small muted">Candle time</div><strong id="candle">—</strong></div>
+<div><div class="small muted">Suggested stop loss</div><strong id="sl">—</strong></div>
+<div><div class="small muted">Suggested take profit</div><strong id="tp">—</strong></div>
+</div>
+</section>
+<section class="card">
+<strong>Indicator details</strong>
+<div class="row"><span class="muted">EMA 9</span><strong id="ema9">—</strong></div>
+<div class="row"><span class="muted">EMA 21</span><strong id="ema21">—</strong></div>
+<div class="row"><span class="muted">RSI 14</span><strong id="rsi">—</strong></div>
+<div class="row"><span class="muted">MACD</span><strong id="macd">—</strong></div>
+<div class="row"><span class="muted">Signal strength</span><strong id="strength">—</strong></div>
+</section>
+<section class="card notice"><strong>Important risk notice</strong><p>Signals are technical estimates based on the latest available one-minute candles, not guaranteed predictions. Short-timeframe Forex trading is highly risky. Data may be delayed, limited by your API plan, or unavailable. Confirm independently before making any decision. No broker connection, automatic order execution, or profit guarantee is provided.</p></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>Number.isFinite(n)?n.toFixed(5):"—";
+function ema(values,period){const k=2/(period+1);let v=values[0];for(let i=1;i<values.length;i++)v=values[i]*k+v*(1-k);return v}
+function rsi(values,p=14){let gain=0,loss=0;for(let i=values.length-p;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)gain+=d;else loss-=d}const ag=gain/p,al=loss/p;return al===0?100:100-100/(1+ag/al)}
+function macd(values){const fast=ema(values.slice(-60),12),slow=ema(values.slice(-60),26);return fast-slow}
+async function analyse(){
+ const key=$("key").value.trim(),symbol=$("symbol").value,btn=$("analyze");
+ if(!key){$("status").textContent="Please enter your Twelve Data API key.";return}
+ btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
+ try{
+  const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&apikey="+encodeURIComponent(key);
+  const res=await fetch(url);const data=await res.json();
+  if(!res.ok||data.status==="error"||!data.values)throw new Error(data.message||"Market data could not be loaded. Check your API key and data plan.");
+  const bars=data.values.slice().reverse(),closes=bars.map(x=>Number(x.close)).filter(Number.isFinite);
+  if(closes.length<35)throw new Error("Not enough one-minute candles returned to calculate indicators.");
+  const e9=ema(closes.slice(-60),9),e21=ema(closes.slice(-60),21),rv=rsi(closes,14),m=macd(closes);
+  const last=closes[closes.length-1],prev=closes[closes.length-2];
+  let score=0;if(e9>e21)score++;else score--;if(rv>50)score++;else if(rv<50)score--;if(m>0)score++;else score--;if(last>prev)score+=0.5;else score-=0.5;
+  const signal=score>=2?"BUY":score<=-2?"SELL":"WAIT";
+  const range=Math.max(Math.abs(last)*0.0008,Math.abs(last-prev)*2);
+  $("signal").textContent=signal;$("signal").className="signal "+signal.toLowerCase();
+  $("summary").textContent=signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
+  $("price").textContent=fmt(last);$("candle").textContent=bars[bars.length-1].datetime||"—";
+  $("sl").textContent=fmt(signal==="BUY"?last-range:signal==="SELL"?last+range:NaN);
+  $("tp").textContent=fmt(signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN);
+  $("ema9").textContent=fmt(e9);$("ema21").textContent=fmt(e21);$("rsi").textContent=rv.toFixed(2);$("macd").textContent=fmt(m);
+  $("strength").textContent=Math.min(100,Math.round(Math.abs(score)/3.5*100))+"% (rule score)";
+  $("status").textContent="Market data received successfully · "+symbol+" · "+closes.length+" candles. Last request: "+new Date().toLocaleTimeString();
+ }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
+ finally{btn.disabled=false}
+}
+$("analyze").addEventListener("click",analyse);
+</script></body></html>
