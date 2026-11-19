@@ -18,6 +18,7 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 @media(max-width:520px){main{padding:16px 11px 30px}.grid{grid-template-columns:1fr}.card{padding:14px}}
 .history-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.history-item{border:1px solid #ffffff18;border-radius:10px;padding:10px;background:#081a30}.history-top{display:flex;justify-content:space-between;gap:8px;font-weight:700}.history-meta{font-size:11px;color:var(--muted);margin-top:5px}.controls{display:grid;grid-template-columns:1fr 1fr;gap:9px}.controls button{margin-top:0}.btn-secondary{background:#244362}.empty{color:var(--muted);font-size:13px;padding:8px 0}
 .pairs-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}.pair-card{background:#081a30;border:1px solid #ffffff18;border-radius:11px;padding:11px;min-width:0}.pair-head{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pair-price{font-size:19px;font-weight:800;margin-top:7px;overflow-wrap:anywhere}.pair-meta{font-size:11px;color:var(--muted);margin-top:5px}.top-box{border:1px solid #39a5ff66;background:#0a3153;border-radius:12px;padding:12px;margin-top:12px}.alert-status{font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:420px){.pairs-grid{grid-template-columns:1fr}}
+.tracker-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}.tracker-stat{background:#081a30;border:1px solid #ffffff18;border-radius:11px;padding:11px}.tracker-value{font-size:23px;font-weight:850;margin-top:4px}.tracker-label{font-size:11px;color:var(--muted)}.tracker-note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:10px}@media(max-width:420px){.tracker-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body><main>
@@ -60,6 +61,17 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 <button id="enableAlerts" type="button" class="btn-secondary">Enable signal alerts</button>
 <div id="alertStatus" class="alert-status">Alerts are off. Enable them to receive browser notifications when a pair changes to BUY or SELL.</div>
 </section>
+<section class="card">
+<strong>SIGNAL ACCURACY & PERFORMANCE</strong>
+<div class="small muted">Approximate next-candle direction check · stored on this device only</div>
+<div class="tracker-grid">
+ <div class="tracker-stat"><div class="tracker-label">OVERALL CHECKED</div><div class="tracker-value" id="trackerAccuracy">—</div><div class="tracker-label" id="trackerRecord">0 wins · 0 losses</div></div>
+ <div class="tracker-stat"><div class="tracker-label">PENDING SIGNALS</div><div class="tracker-value" id="trackerPending">0</div><div class="tracker-label">Waiting for a later fetched candle</div></div>
+ <div class="tracker-stat"><div class="tracker-label">TODAY'S CHECKED</div><div class="tracker-value" id="todayAccuracy">—</div><div class="tracker-label" id="todayRecord">0 wins · 0 losses</div></div>
+ <div class="tracker-stat"><div class="tracker-label">TOTAL TRACKED</div><div class="tracker-value" id="trackerTotal">0</div><div class="tracker-label">BUY / SELL signals recorded</div></div>
+</div>
+<div class="tracker-note">A BUY is marked correct if the first later candle close fetched is above the signal candle close; SELL is correct if it is below. This is not broker P&amp;L, a guaranteed win rate, or a backtest: spreads, fees, slippage, stop-loss and take-profit execution are not included. WAIT signals are not scored.</div>
+</section>
 <section class="card"><strong>Signal history</strong><div class="small muted">Saved only in this browser on this device. Latest 100 unique candle signals.</div><div id="historyList" class="history-list"><div class="empty">No signals saved yet.</div></div></section>
 <section class="card notice"><strong>Important risk notice</strong><p>Signals are technical estimates based on the latest available one-minute candles, not guaranteed predictions. Short-timeframe Forex trading is highly risky. Data may be delayed, limited by your API plan, or unavailable. Confirm independently before making any decision. No broker connection, automatic order execution, or profit guarantee is provided.</p></section>
 </main>
@@ -67,6 +79,41 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 const $=id=>document.getElementById(id);
 const fmt=n=>Number.isFinite(n)?n.toFixed(5):"—";
 const HISTORY_KEY="sm_auto_forex_signal_history_v1";
+
+const TRACKER_KEY="sm_auto_forex_tracker_v1";
+function getTracker(){try{return JSON.parse(localStorage.getItem(TRACKER_KEY)||"[]")}catch{return []}}
+function saveTracker(items){try{localStorage.setItem(TRACKER_KEY,JSON.stringify(items.slice(-500)))}catch(e){$("status").textContent="Performance tracker could not save; browser storage may be full."}}
+function localDay(iso){return new Date(iso).toLocaleDateString("en-CA")}
+function renderTracker(){
+ const items=getTracker(),done=items.filter(x=>x.outcome==="win"||x.outcome==="loss"),wins=done.filter(x=>x.outcome==="win").length,losses=done.filter(x=>x.outcome==="loss").length;
+ const today=localDay(new Date().toISOString()),daily=done.filter(x=>x.day===today),dw=daily.filter(x=>x.outcome==="win").length,dl=daily.filter(x=>x.outcome==="loss").length;
+ $("trackerAccuracy").textContent=done.length?Math.round(wins/done.length*100)+"%":"—";
+ $("trackerRecord").textContent=wins+" wins · "+losses+" losses"+(items.some(x=>x.outcome==="flat")?" · "+items.filter(x=>x.outcome==="flat").length+" flat":"");
+ $("trackerPending").textContent=items.filter(x=>x.outcome==="pending").length;
+ $("todayAccuracy").textContent=daily.length?Math.round(dw/daily.length*100)+"%":"—";
+ $("todayRecord").textContent=dw+" wins · "+dl+" losses";
+ $("trackerTotal").textContent=items.length;
+}
+function trackFetchedCandle(r){
+ const items=getTracker(),price=Number(r.price),candleTime=Date.parse(r.candle.replace(" ","T")+"Z");
+ let changed=false;
+ if(Number.isFinite(price)&&Number.isFinite(candleTime)){
+  items.forEach(item=>{
+   if(item.symbol!==r.symbol||item.outcome!=="pending")return;
+   const prior=Date.parse(String(item.candle).replace(" ","T")+"Z");
+   if(Number.isFinite(prior)&&candleTime>prior){
+    item.outcome=price===item.entry?"flat":((item.signal==="BUY"&&price>item.entry)||(item.signal==="SELL"&&price<item.entry)?"win":"loss");
+    item.checkedCandle=r.candle;item.checkedPrice=price;changed=true;
+   }
+  });
+  if((r.signal==="BUY"||r.signal==="SELL")&&!items.some(x=>x.symbol===r.symbol&&x.candle===r.candle)){
+   items.push({symbol:r.symbol,signal:r.signal,candle:r.candle,entry:price,day:localDay(new Date().toISOString()),outcome:"pending",createdAt:new Date().toISOString()});changed=true;
+  }
+ }
+ if(changed)saveTracker(items);
+ renderTracker();
+}
+
 let autoTimer=null;
 function getHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||"[]")}catch{return []}}
 function renderHistory(){
@@ -118,6 +165,7 @@ function updateDetail(r){
  $("ema9").textContent=fmt(r.e9);$("ema21").textContent=fmt(r.e21);$("rsi").textContent=r.rsi.toFixed(2);
  $("macd").textContent=fmt(r.macd);$("strength").textContent=r.strength+"% (rule score)";
  saveSignal({symbol:r.symbol,signal:r.signal,price:r.price,candle:r.candle,strength:r.strength+"%",checked:new Date().toLocaleString()});
+ trackFetchedCandle(r);
 }
 function renderPairs(){
  const host=$("pairsGrid");host.textContent="";
@@ -202,5 +250,5 @@ $("enableAlerts").addEventListener("click",async()=>{
  try{const p=await Notification.requestPermission();$("alertStatus").textContent=p==="granted"?"Signal alerts enabled. Notifications appear when a pair changes to BUY or SELL.":("Notification permission: "+p)}
  catch(e){$("alertStatus").textContent="Could not enable notifications. You can still watch the all-pairs panel."}
 });
-renderHistory();renderPairs();
+renderHistory();renderPairs();renderTracker();
 </script></body></html>
