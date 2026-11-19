@@ -16,6 +16,7 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 .muted{color:var(--muted)}.small{font-size:12px}.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #ffffff12}.row:last-child{border:0}.status{font-size:12px;color:var(--muted);margin-top:10px;overflow-wrap:anywhere}
 .notice{font-size:12px;line-height:1.55;color:#c6d7e9}.warning{color:var(--amber)}.positive{color:var(--green)}.negative{color:var(--red)}
 @media(max-width:520px){main{padding:16px 11px 30px}.grid{grid-template-columns:1fr}.card{padding:14px}}
+.history-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.history-item{border:1px solid #ffffff18;border-radius:10px;padding:10px;background:#081a30}.history-top{display:flex;justify-content:space-between;gap:8px;font-weight:700}.history-meta{font-size:11px;color:var(--muted);margin-top:5px}.controls{display:grid;grid-template-columns:1fr 1fr;gap:9px}.controls button{margin-top:0}.btn-secondary{background:#244362}.empty{color:var(--muted);font-size:13px;padding:8px 0}
 </style>
 </head>
 <body><main>
@@ -26,6 +27,7 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 <div><label for="key">Twelve Data API key</label><input id="key" type="password" autocomplete="off" placeholder="Paste your own API key"></div>
 </div>
 <button id="analyze">Fetch market data & analyse</button>
+<div class="controls" style="margin-top:10px"><button id="autoToggle" type="button" class="btn-secondary">Start 1-minute auto refresh</button><button id="clearHistory" type="button" class="btn-secondary">Clear signal history</button></div><div class="status" id="autoStatus">Auto refresh is off. Keep this page open for automatic updates.</div>
 <div class="status" id="status">Enter your API key, choose a pair, then press the button.</div>
 <p class="notice">Your API key is used in this browser session to request market data. Do not share it publicly or commit it to GitHub. This page does not save the key or place trades.</p>
 </section>
@@ -48,17 +50,43 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 <div class="row"><span class="muted">MACD</span><strong id="macd">—</strong></div>
 <div class="row"><span class="muted">Signal strength</span><strong id="strength">—</strong></div>
 </section>
+<section class="card"><strong>Signal history</strong><div class="small muted">Saved only in this browser on this device. Latest 100 unique candle signals.</div><div id="historyList" class="history-list"><div class="empty">No signals saved yet.</div></div></section>
 <section class="card notice"><strong>Important risk notice</strong><p>Signals are technical estimates based on the latest available one-minute candles, not guaranteed predictions. Short-timeframe Forex trading is highly risky. Data may be delayed, limited by your API plan, or unavailable. Confirm independently before making any decision. No broker connection, automatic order execution, or profit guarantee is provided.</p></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const fmt=n=>Number.isFinite(n)?n.toFixed(5):"—";
+const HISTORY_KEY="sm_auto_forex_signal_history_v1";
+let autoTimer=null;
+function getHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||"[]")}catch{return []}}
+function renderHistory(){
+ const host=$("historyList"),items=getHistory();host.textContent="";
+ if(!items.length){const empty=document.createElement("div");empty.className="empty";empty.textContent="No signals saved yet.";host.appendChild(empty);return}
+ items.forEach(item=>{
+  const card=document.createElement("div");card.className="history-item";
+  const top=document.createElement("div");top.className="history-top";
+  const pair=document.createElement("span");pair.textContent=item.symbol+" · "+item.signal;
+  pair.className=item.signal==="BUY"?"positive":item.signal==="SELL"?"negative":"warning";
+  const price=document.createElement("span");price.textContent=item.price;
+  top.append(pair,price);
+  const meta=document.createElement("div");meta.className="history-meta";meta.textContent="Candle: "+item.candle+" · Strength: "+item.strength+" · Checked: "+item.checked;
+  card.append(top,meta);host.appendChild(card);
+ });
+}
+function saveSignal(item){
+ try{
+  const items=getHistory(),key=item.symbol+"|"+item.candle;
+  if(items.some(x=>x.key===key))return;
+  items.unshift({...item,key});localStorage.setItem(HISTORY_KEY,JSON.stringify(items.slice(0,100)));renderHistory();
+ }catch(e){$("autoStatus").textContent="History could not be saved in this browser (storage may be disabled)."}
+}
 function ema(values,period){const k=2/(period+1);let v=values[0];for(let i=1;i<values.length;i++)v=values[i]*k+v*(1-k);return v}
 function rsi(values,p=14){let gain=0,loss=0;for(let i=values.length-p;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)gain+=d;else loss-=d}const ag=gain/p,al=loss/p;return al===0?100:100-100/(1+ag/al)}
 function macd(values){const fast=ema(values.slice(-60),12),slow=ema(values.slice(-60),26);return fast-slow}
 async function analyse(){
  const key=$("key").value.trim(),symbol=$("symbol").value,btn=$("analyze");
- if(!key){$("status").textContent="Please enter your Twelve Data API key.";return}
+ if(btn.disabled)return;
+ if(!key){$("status").textContent="Please enter your Twelve Data API key.";if(autoTimer)stopAuto();return}
  btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
  try{
   const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&apikey="+encodeURIComponent(key);
@@ -71,16 +99,29 @@ async function analyse(){
   let score=0;if(e9>e21)score++;else score--;if(rv>50)score++;else if(rv<50)score--;if(m>0)score++;else score--;if(last>prev)score+=0.5;else score-=0.5;
   const signal=score>=2?"BUY":score<=-2?"SELL":"WAIT";
   const range=Math.max(Math.abs(last)*0.0008,Math.abs(last-prev)*2);
+  const candle=bars[bars.length-1].datetime||"—",strength=Math.min(100,Math.round(Math.abs(score)/3.5*100))+"%";
   $("signal").textContent=signal;$("signal").className="signal "+signal.toLowerCase();
   $("summary").textContent=signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
-  $("price").textContent=fmt(last);$("candle").textContent=bars[bars.length-1].datetime||"—";
+  $("price").textContent=fmt(last);$("candle").textContent=candle;
   $("sl").textContent=fmt(signal==="BUY"?last-range:signal==="SELL"?last+range:NaN);
   $("tp").textContent=fmt(signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN);
   $("ema9").textContent=fmt(e9);$("ema21").textContent=fmt(e21);$("rsi").textContent=rv.toFixed(2);$("macd").textContent=fmt(m);
-  $("strength").textContent=Math.min(100,Math.round(Math.abs(score)/3.5*100))+"% (rule score)";
+  $("strength").textContent=strength+" (rule score)";
   $("status").textContent="Market data received successfully · "+symbol+" · "+closes.length+" candles. Last request: "+new Date().toLocaleTimeString();
+  saveSignal({symbol,signal,price:fmt(last),candle,strength,checked:new Date().toLocaleString()});
  }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
  finally{btn.disabled=false}
 }
+function stopAuto(){if(autoTimer!==null){clearInterval(autoTimer);autoTimer=null}$("autoToggle").textContent="Start 1-minute auto refresh";$("autoStatus").textContent="Auto refresh is off. Keep this page open for automatic updates."}
+function startAuto(){
+ if(!$("key").value.trim()){$("status").textContent="Enter your API key before starting auto refresh.";return}
+ if(autoTimer!==null)return;
+ $("autoToggle").textContent="Stop auto refresh";$("autoStatus").textContent="Auto refresh is ON · fetching now, then every 60 seconds while this page stays open.";
+ analyse();autoTimer=setInterval(()=>{if(!document.hidden)analyse()},60000);
+}
 $("analyze").addEventListener("click",analyse);
+$("autoToggle").addEventListener("click",()=>autoTimer===null?startAuto():stopAuto());
+$("clearHistory").addEventListener("click",()=>{if(confirm("Clear all saved signal history from this browser?")){localStorage.removeItem(HISTORY_KEY);renderHistory()}});
+$("symbol").addEventListener("change",()=>{if(autoTimer!==null){$("autoStatus").textContent="Pair changed. The new pair will be fetched on the next refresh; press Fetch now to update immediately."}});
+renderHistory();
 </script></body></html>
