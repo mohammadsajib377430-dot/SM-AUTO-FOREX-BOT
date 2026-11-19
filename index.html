@@ -176,7 +176,7 @@ async function scanAllPairs(){
   for(const symbol of pairs){
    try{
     const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;updateDetailIfSelected(r);notifyTransition(r);ok++;
-   }catch(e){errors.push(symbol+": "+e.message)}
+   }catch(e){delete latestResults[symbol];errors.push(symbol+": "+e.message)}
    renderPairs();
   }
   const selected=latestResults[$("symbol").value];
