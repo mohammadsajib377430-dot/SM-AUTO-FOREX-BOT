@@ -17,6 +17,7 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 .notice{font-size:12px;line-height:1.55;color:#c6d7e9}.warning{color:var(--amber)}.positive{color:var(--green)}.negative{color:var(--red)}
 @media(max-width:520px){main{padding:16px 11px 30px}.grid{grid-template-columns:1fr}.card{padding:14px}}
 .history-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.history-item{border:1px solid #ffffff18;border-radius:10px;padding:10px;background:#081a30}.history-top{display:flex;justify-content:space-between;gap:8px;font-weight:700}.history-meta{font-size:11px;color:var(--muted);margin-top:5px}.controls{display:grid;grid-template-columns:1fr 1fr;gap:9px}.controls button{margin-top:0}.btn-secondary{background:#244362}.empty{color:var(--muted);font-size:13px;padding:8px 0}
+.pairs-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}.pair-card{background:#081a30;border:1px solid #ffffff18;border-radius:11px;padding:11px;min-width:0}.pair-head{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pair-price{font-size:19px;font-weight:800;margin-top:7px;overflow-wrap:anywhere}.pair-meta{font-size:11px;color:var(--muted);margin-top:5px}.top-box{border:1px solid #39a5ff66;background:#0a3153;border-radius:12px;padding:12px;margin-top:12px}.alert-status{font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:420px){.pairs-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
@@ -49,6 +50,15 @@ button{background:linear-gradient(90deg,#168bff,#0875d1);border:0;font-weight:70
 <div class="row"><span class="muted">RSI 14</span><strong id="rsi">—</strong></div>
 <div class="row"><span class="muted">MACD</span><strong id="macd">—</strong></div>
 <div class="row"><span class="muted">Signal strength</span><strong id="strength">—</strong></div>
+</section>
+<section class="card">
+<strong>ALL PAIRS LIVE PANEL</strong>
+<div class="small muted">Latest scan across EUR/USD, GBP/USD, USD/JPY and XAU/USD.</div>
+<div id="topSignal" class="top-box"><div class="small muted">TOP SIGNAL</div><strong id="topText">Waiting for all-pair scan…</strong></div>
+<div id="pairsGrid" class="pairs-grid"><div class="empty">Scan all pairs to load live results.</div></div>
+<button id="scanAll" type="button">Scan all 4 pairs</button>
+<button id="enableAlerts" type="button" class="btn-secondary">Enable signal alerts</button>
+<div id="alertStatus" class="alert-status">Alerts are off. Enable them to receive browser notifications when a pair changes to BUY or SELL.</div>
 </section>
 <section class="card"><strong>Signal history</strong><div class="small muted">Saved only in this browser on this device. Latest 100 unique candle signals.</div><div id="historyList" class="history-list"><div class="empty">No signals saved yet.</div></div></section>
 <section class="card notice"><strong>Important risk notice</strong><p>Signals are technical estimates based on the latest available one-minute candles, not guaranteed predictions. Short-timeframe Forex trading is highly risky. Data may be delayed, limited by your API plan, or unavailable. Confirm independently before making any decision. No broker connection, automatic order execution, or profit guarantee is provided.</p></section>
@@ -83,45 +93,114 @@ function saveSignal(item){
 function ema(values,period){const k=2/(period+1);let v=values[0];for(let i=1;i<values.length;i++)v=values[i]*k+v*(1-k);return v}
 function rsi(values,p=14){let gain=0,loss=0;for(let i=values.length-p;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)gain+=d;else loss-=d}const ag=gain/p,al=loss/p;return al===0?100:100-100/(1+ag/al)}
 function macd(values){const fast=ema(values.slice(-60),12),slow=ema(values.slice(-60),26);return fast-slow}
+async function fetchAnalysis(symbol,key){
+ const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&apikey="+encodeURIComponent(key);
+ const res=await fetch(url);const data=await res.json();
+ if(!res.ok||data.status==="error"||!data.values)throw new Error(data.message||"Market data unavailable");
+ const bars=data.values.slice().reverse(),closes=bars.map(x=>Number(x.close)).filter(Number.isFinite);
+ if(closes.length<35)throw new Error("Not enough candles");
+ const e9=ema(closes.slice(-60),9),e21=ema(closes.slice(-60),21),rv=rsi(closes,14),m=macd(closes);
+ const last=closes[closes.length-1],prev=closes[closes.length-2];
+ let score=0;if(e9>e21)score++;else score--;if(rv>50)score++;else if(rv<50)score--;if(m>0)score++;else score--;if(last>prev)score+=0.5;else score-=0.5;
+ const signal=score>=2?"BUY":score<=-2?"SELL":"WAIT";
+ const range=Math.max(Math.abs(last)*0.0008,Math.abs(last-prev)*2);
+ const candle=bars[bars.length-1].datetime||"—";
+ const strength=Math.min(100,Math.round(Math.abs(score)/3.5*100));
+ return {symbol,signal,score,strength,price:fmt(last),candle,e9,e21,rsi:rv,macd:m,
+  sl:signal==="BUY"?last-range:signal==="SELL"?last+range:NaN,
+  tp:signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN};
+}
+function updateDetail(r){
+ $("signal").textContent=r.signal;$("signal").className="signal "+r.signal.toLowerCase();
+ $("summary").textContent=r.signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(r.signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
+ $("price").textContent=r.price;$("candle").textContent=r.candle;
+ $("sl").textContent=fmt(r.sl);$("tp").textContent=fmt(r.tp);
+ $("ema9").textContent=fmt(r.e9);$("ema21").textContent=fmt(r.e21);$("rsi").textContent=r.rsi.toFixed(2);
+ $("macd").textContent=fmt(r.macd);$("strength").textContent=r.strength+"% (rule score)";
+ saveSignal({symbol:r.symbol,signal:r.signal,price:r.price,candle:r.candle,strength:r.strength+"%",checked:new Date().toLocaleString()});
+}
+function renderPairs(){
+ const host=$("pairsGrid");host.textContent="";
+ const pairs=["EUR/USD","GBP/USD","USD/JPY","XAU/USD"];
+ pairs.forEach(symbol=>{
+  const r=latestResults[symbol],card=document.createElement("div");card.className="pair-card";
+  if(!r){const title=document.createElement("div");title.className="pair-head";title.textContent=symbol;
+   const meta=document.createElement("div");meta.className="pair-meta";meta.textContent="Not scanned yet";card.append(title,meta);host.appendChild(card);return}
+  const head=document.createElement("div");head.className="pair-head";
+  const name=document.createElement("span");name.textContent=symbol;
+  const sig=document.createElement("span");sig.textContent=r.signal;sig.className=r.signal==="BUY"?"positive":r.signal==="SELL"?"negative":"warning";
+  head.append(name,sig);
+  const price=document.createElement("div");price.className="pair-price";price.textContent=r.price;
+  const meta=document.createElement("div");meta.className="pair-meta";meta.textContent="Strength: "+r.strength+"% · "+r.candle;
+  card.append(head,price,meta);host.appendChild(card);
+ });
+ const directional=pairs.map(p=>latestResults[p]).filter(r=>r&&(r.signal==="BUY"||r.signal==="SELL"));
+ directional.sort((a,b)=>b.strength-a.strength);
+ const best=directional[0];
+ $("topText").textContent=best?best.symbol+" · "+best.signal+" · "+best.strength+"% rule score"+(directional.length>1&&directional[1].strength===best.strength?" (tied strongest)":""):"No clear BUY/SELL signal — WAIT";
+}
+let latestResults={};
+let previousSignals={};
+function notifyTransition(r){
+ const old=previousSignals[r.symbol];
+ if(old && old.signal!==r.signal && (r.signal==="BUY"||r.signal==="SELL")){
+  const msg=r.symbol+" changed to "+r.signal+" · "+r.price;
+  $("alertStatus").textContent="New signal: "+msg;
+  if("Notification" in window && Notification.permission==="granted"){
+   try{new Notification("SM AUTO FOREX BOT",{body:msg})}catch(e){}
+  }
+ }
+ previousSignals[r.symbol]={signal:r.signal,candle:r.candle};
+}
 async function analyse(){
  const key=$("key").value.trim(),symbol=$("symbol").value,btn=$("analyze");
  if(btn.disabled)return;
  if(!key){$("status").textContent="Please enter your Twelve Data API key.";if(autoTimer)stopAuto();return}
  btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
  try{
-  const url="https://api.twelvedata.com/time_series?symbol="+encodeURIComponent(symbol)+"&interval=1min&outputsize=100&apikey="+encodeURIComponent(key);
-  const res=await fetch(url);const data=await res.json();
-  if(!res.ok||data.status==="error"||!data.values)throw new Error(data.message||"Market data could not be loaded. Check your API key and data plan.");
-  const bars=data.values.slice().reverse(),closes=bars.map(x=>Number(x.close)).filter(Number.isFinite);
-  if(closes.length<35)throw new Error("Not enough one-minute candles returned to calculate indicators.");
-  const e9=ema(closes.slice(-60),9),e21=ema(closes.slice(-60),21),rv=rsi(closes,14),m=macd(closes);
-  const last=closes[closes.length-1],prev=closes[closes.length-2];
-  let score=0;if(e9>e21)score++;else score--;if(rv>50)score++;else if(rv<50)score--;if(m>0)score++;else score--;if(last>prev)score+=0.5;else score-=0.5;
-  const signal=score>=2?"BUY":score<=-2?"SELL":"WAIT";
-  const range=Math.max(Math.abs(last)*0.0008,Math.abs(last-prev)*2);
-  const candle=bars[bars.length-1].datetime||"—",strength=Math.min(100,Math.round(Math.abs(score)/3.5*100))+"%";
-  $("signal").textContent=signal;$("signal").className="signal "+signal.toLowerCase();
-  $("summary").textContent=signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
-  $("price").textContent=fmt(last);$("candle").textContent=candle;
-  $("sl").textContent=fmt(signal==="BUY"?last-range:signal==="SELL"?last+range:NaN);
-  $("tp").textContent=fmt(signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN);
-  $("ema9").textContent=fmt(e9);$("ema21").textContent=fmt(e21);$("rsi").textContent=rv.toFixed(2);$("macd").textContent=fmt(m);
-  $("strength").textContent=strength+" (rule score)";
-  $("status").textContent="Market data received successfully · "+symbol+" · "+closes.length+" candles. Last request: "+new Date().toLocaleTimeString();
-  saveSignal({symbol,signal,price:fmt(last),candle,strength,checked:new Date().toLocaleString()});
+  const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;updateDetail(r);renderPairs();notifyTransition(r);
+  $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+new Date().toLocaleTimeString();
  }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
  finally{btn.disabled=false}
 }
+async function scanAllPairs(){
+ const key=$("key").value.trim();
+ if(!key){$("status").textContent="Enter your API key before scanning all pairs.";return}
+ const scanBtn=$("scanAll"),analyzeBtn=$("analyze");
+ if(scanBtn.disabled)return;
+ scanBtn.disabled=true;analyzeBtn.disabled=true;
+ $("status").textContent="Scanning all four pairs. This uses four market-data requests.";
+ const pairs=["EUR/USD","GBP/USD","USD/JPY","XAU/USD"];
+ let ok=0,errors=[];
+ try{
+  for(const symbol of pairs){
+   try{
+    const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;updateDetailIfSelected(r);notifyTransition(r);ok++;
+   }catch(e){errors.push(symbol+": "+e.message)}
+   renderPairs();
+  }
+  const selected=latestResults[$("symbol").value];
+  if(selected)updateDetail(selected);
+  $("status").textContent="All-pair scan complete · "+ok+"/4 pairs received data"+(errors.length?" · "+errors.join(" | "):"")+" · "+new Date().toLocaleTimeString();
+ }finally{scanBtn.disabled=false;analyzeBtn.disabled=false}
+}
+function updateDetailIfSelected(r){if($("symbol").value===r.symbol)updateDetail(r)}
 function stopAuto(){if(autoTimer!==null){clearInterval(autoTimer);autoTimer=null}$("autoToggle").textContent="Start 1-minute auto refresh";$("autoStatus").textContent="Auto refresh is off. Keep this page open for automatic updates."}
 function startAuto(){
  if(!$("key").value.trim()){$("status").textContent="Enter your API key before starting auto refresh.";return}
  if(autoTimer!==null)return;
  $("autoToggle").textContent="Stop auto refresh";$("autoStatus").textContent="Auto refresh is ON · fetching now, then every 60 seconds while this page stays open.";
- analyse();autoTimer=setInterval(()=>{if(!document.hidden)analyse()},60000);
+ scanAllPairs();autoTimer=setInterval(()=>{if(!document.hidden)scanAllPairs()},60000);
 }
 $("analyze").addEventListener("click",analyse);
 $("autoToggle").addEventListener("click",()=>autoTimer===null?startAuto():stopAuto());
 $("clearHistory").addEventListener("click",()=>{if(confirm("Clear all saved signal history from this browser?")){localStorage.removeItem(HISTORY_KEY);renderHistory()}});
 $("symbol").addEventListener("change",()=>{if(autoTimer!==null){$("autoStatus").textContent="Pair changed. The new pair will be fetched on the next refresh; press Fetch now to update immediately."}});
-renderHistory();
+$("scanAll").addEventListener("click",scanAllPairs);
+$("enableAlerts").addEventListener("click",async()=>{
+ if(!("Notification" in window)){$("alertStatus").textContent="Browser notifications are not supported here.";return}
+ try{const p=await Notification.requestPermission();$("alertStatus").textContent=p==="granted"?"Signal alerts enabled. Notifications appear when a pair changes to BUY or SELL.":("Notification permission: "+p)}
+ catch(e){$("alertStatus").textContent="Could not enable notifications. You can still watch the all-pairs panel."}
+});
+renderHistory();renderPairs();
 </script></body></html>
