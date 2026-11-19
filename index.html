@@ -83,7 +83,9 @@ const HISTORY_KEY="sm_auto_forex_signal_history_v1";
 const TRACKER_KEY="sm_auto_forex_tracker_v1";
 function getTracker(){try{return JSON.parse(localStorage.getItem(TRACKER_KEY)||"[]")}catch{return []}}
 function saveTracker(items){try{localStorage.setItem(TRACKER_KEY,JSON.stringify(items.slice(-500)))}catch(e){$("status").textContent="Performance tracker could not save; browser storage may be full."}}
-function localDay(iso){return new Date(iso).toLocaleDateString("en-CA")}
+function localDay(iso){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(iso))}
+function formatBDTime(value){if(!value||value==="—")return "—";const d=new Date(String(value).replace(" ","T")+"Z");if(!Number.isFinite(d.getTime()))return value;return new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(d)}
+function nowBDTime(){return new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Dhaka",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date())}
 function renderTracker(){
  const items=getTracker(),done=items.filter(x=>x.outcome==="win"||x.outcome==="loss"),wins=done.filter(x=>x.outcome==="win").length,losses=done.filter(x=>x.outcome==="loss").length;
  const today=localDay(new Date().toISOString()),daily=done.filter(x=>x.day===today),dw=daily.filter(x=>x.outcome==="win").length,dl=daily.filter(x=>x.outcome==="loss").length;
@@ -153,18 +155,18 @@ async function fetchAnalysis(symbol,key){
  const range=Math.max(Math.abs(last)*0.0008,Math.abs(last-prev)*2);
  const candle=bars[bars.length-1].datetime||"—";
  const strength=Math.min(100,Math.round(Math.abs(score)/3.5*100));
- return {symbol,signal,score,strength,price:fmt(last),candle,e9,e21,rsi:rv,macd:m,
+ return {symbol,signal,score,strength,price:fmt(last),candle,candleDisplay:formatBDTime(candle),e9,e21,rsi:rv,macd:m,
   sl:signal==="BUY"?last-range:signal==="SELL"?last+range:NaN,
   tp:signal==="BUY"?last+range*1.5:signal==="SELL"?last-range*1.5:NaN};
 }
 function updateDetail(r){
  $("signal").textContent=r.signal;$("signal").className="signal "+r.signal.toLowerCase();
  $("summary").textContent=r.signal==="WAIT"?"Indicators are mixed; wait for clearer alignment.":(r.signal==="BUY"?"Bullish indicator alignment detected.":"Bearish indicator alignment detected.");
- $("price").textContent=r.price;$("candle").textContent=r.candle;
+ $("price").textContent=r.price;$("candle").textContent=r.candleDisplay;
  $("sl").textContent=fmt(r.sl);$("tp").textContent=fmt(r.tp);
  $("ema9").textContent=fmt(r.e9);$("ema21").textContent=fmt(r.e21);$("rsi").textContent=r.rsi.toFixed(2);
  $("macd").textContent=fmt(r.macd);$("strength").textContent=r.strength+"% (rule score)";
- saveSignal({symbol:r.symbol,signal:r.signal,price:r.price,candle:r.candle,strength:r.strength+"%",checked:new Date().toLocaleString()});
+ saveSignal({symbol:r.symbol,signal:r.signal,price:r.price,candle:r.candleDisplay,strength:r.strength+"%",checked:formatBDTime(new Date().toISOString().replace("T"," ").slice(0,19))});
 }
 function renderPairs(){
  const host=$("pairsGrid");host.textContent="";
@@ -178,7 +180,7 @@ function renderPairs(){
   const sig=document.createElement("span");sig.textContent=r.signal;sig.className=r.signal==="BUY"?"positive":r.signal==="SELL"?"negative":"warning";
   head.append(name,sig);
   const price=document.createElement("div");price.className="pair-price";price.textContent=r.price;
-  const meta=document.createElement("div");meta.className="pair-meta";meta.textContent="Strength: "+r.strength+"% · "+r.candle;
+  const meta=document.createElement("div");meta.className="pair-meta";meta.textContent="Strength: "+r.strength+"% · "+r.candleDisplay;
   card.append(head,price,meta);host.appendChild(card);
  });
  const directional=pairs.map(p=>latestResults[p]).filter(r=>r&&(r.signal==="BUY"||r.signal==="SELL"));
@@ -206,7 +208,7 @@ async function analyse(){
  btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
  try{
   const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;trackFetchedCandle(r);updateDetail(r);renderPairs();notifyTransition(r);
-  $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+new Date().toLocaleTimeString();
+  $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+nowBDTime()+" (BDT);
  }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
  finally{btn.disabled=false}
 }
@@ -228,7 +230,7 @@ async function scanAllPairs(){
   }
   const selected=latestResults[$("symbol").value];
   if(selected)updateDetail(selected);
-  $("status").textContent="All-pair scan complete · "+ok+"/4 pairs received data"+(errors.length?" · "+errors.join(" | "):"")+" · "+new Date().toLocaleTimeString();
+  $("status").textContent="All-pair scan complete · "+ok+"/4 pairs received data"+(errors.length?" · "+errors.join(" | "):"")+" · "+nowBDTime()+" (BDT)";
  }finally{scanBtn.disabled=false;analyzeBtn.disabled=false}
 }
 function updateDetailIfSelected(r){if($("symbol").value===r.symbol)updateDetail(r)}
