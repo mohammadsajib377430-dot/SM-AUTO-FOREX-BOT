@@ -165,7 +165,6 @@ function updateDetail(r){
  $("ema9").textContent=fmt(r.e9);$("ema21").textContent=fmt(r.e21);$("rsi").textContent=r.rsi.toFixed(2);
  $("macd").textContent=fmt(r.macd);$("strength").textContent=r.strength+"% (rule score)";
  saveSignal({symbol:r.symbol,signal:r.signal,price:r.price,candle:r.candle,strength:r.strength+"%",checked:new Date().toLocaleString()});
- trackFetchedCandle(r);
 }
 function renderPairs(){
  const host=$("pairsGrid");host.textContent="";
@@ -206,7 +205,7 @@ async function analyse(){
  if(!key){$("status").textContent="Please enter your Twelve Data API key.";if(autoTimer)stopAuto();return}
  btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
  try{
-  const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;updateDetail(r);renderPairs();notifyTransition(r);
+  const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;trackFetchedCandle(r);updateDetail(r);renderPairs();notifyTransition(r);
   $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+new Date().toLocaleTimeString();
  }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
  finally{btn.disabled=false}
@@ -223,7 +222,7 @@ async function scanAllPairs(){
  try{
   for(const symbol of pairs){
    try{
-    const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;updateDetailIfSelected(r);notifyTransition(r);ok++;
+    const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;trackFetchedCandle(r);updateDetailIfSelected(r);notifyTransition(r);ok++;
    }catch(e){delete latestResults[symbol];errors.push(symbol+": "+e.message)}
    renderPairs();
   }
