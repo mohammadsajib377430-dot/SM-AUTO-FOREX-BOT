@@ -208,7 +208,7 @@ async function analyse(){
  btn.disabled=true;$("status").textContent="Fetching latest one-minute candles…";
  try{
   const r=await fetchAnalysis(symbol,key);latestResults[symbol]=r;trackFetchedCandle(r);updateDetail(r);renderPairs();notifyTransition(r);
-  $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+nowBDTime()+" (BDT);
+  $("status").textContent="Market data received successfully · "+symbol+" · 100 candles. Last request: "+nowBDTime()+" (BDT)";
  }catch(err){$("status").textContent="Error: "+err.message;$("signal").textContent="WAIT";$("signal").className="signal wait";$("summary").textContent="No verified market signal available."}
  finally{btn.disabled=false}
 }
