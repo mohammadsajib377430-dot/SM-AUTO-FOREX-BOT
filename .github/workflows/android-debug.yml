@@ -1,4 +1,4 @@
-name: Build SM AI Trading Android
+name: Build SM AI Trading Android # compatibility test build
 
 on:
   push:
