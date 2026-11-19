@@ -90,10 +90,10 @@ function renderTracker(){
  const items=getTracker(),done=items.filter(x=>x.outcome==="win"||x.outcome==="loss"),wins=done.filter(x=>x.outcome==="win").length,losses=done.filter(x=>x.outcome==="loss").length;
  const today=localDay(new Date().toISOString()),daily=done.filter(x=>x.day===today),dw=daily.filter(x=>x.outcome==="win").length,dl=daily.filter(x=>x.outcome==="loss").length;
  $("trackerAccuracy").textContent=done.length?Math.round(wins/done.length*100)+"%":"—";
- $("trackerRecord").textContent=wins+" wins · "+losses+" losses"+(items.some(x=>x.outcome==="flat")?" · "+items.filter(x=>x.outcome==="flat").length+" flat":"");
+ $("trackerRecord").textContent=done.length+" checked · "+wins+" wins · "+losses+" losses"+(items.some(x=>x.outcome==="flat")?" · "+items.filter(x=>x.outcome==="flat").length+" flat":"");
  $("trackerPending").textContent=items.filter(x=>x.outcome==="pending").length;
  $("todayAccuracy").textContent=daily.length?Math.round(dw/daily.length*100)+"%":"—";
- $("todayRecord").textContent=dw+" wins · "+dl+" losses";
+ $("todayRecord").textContent=daily.length+" checked · "+dw+" wins · "+dl+" losses";
  $("trackerTotal").textContent=items.length;
 }
 function trackFetchedCandle(r){
@@ -118,6 +118,16 @@ function trackFetchedCandle(r){
 
 let autoTimer=null;
 function getHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||"[]")}catch{return []}}
+function historyTimeBD(value){
+ if(!value||value==="—")return "—";
+ const s=String(value);
+ if(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(s))return formatBDTime(s);
+ if(/^\d{1,2}\/\d{1,2}\/\d{4},? \d{1,2}:\d{2}:\d{2} [AP]M$/i.test(s)){
+  const d=new Date(s);
+  if(Number.isFinite(d.getTime()))return new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Dhaka",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(d);
+ }
+ return s;
+}
 function renderHistory(){
  const host=$("historyList"),items=getHistory();host.textContent="";
  if(!items.length){const empty=document.createElement("div");empty.className="empty";empty.textContent="No signals saved yet.";host.appendChild(empty);return}
@@ -128,7 +138,7 @@ function renderHistory(){
   pair.className=item.signal==="BUY"?"positive":item.signal==="SELL"?"negative":"warning";
   const price=document.createElement("span");price.textContent=item.price;
   top.append(pair,price);
-  const meta=document.createElement("div");meta.className="history-meta";meta.textContent="Candle: "+item.candle+" · Strength: "+item.strength+" · Checked: "+item.checked;
+  const meta=document.createElement("div");meta.className="history-meta";meta.textContent="Candle: "+historyTimeBD(item.candle)+" · Strength: "+item.strength+" · Checked: "+historyTimeBD(item.checked);
   card.append(top,meta);host.appendChild(card);
  });
 }
