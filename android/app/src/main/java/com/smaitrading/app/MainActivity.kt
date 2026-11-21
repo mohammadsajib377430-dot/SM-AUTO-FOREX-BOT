@@ -1,8 +1,10 @@
 package com.smaitrading.app
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -19,16 +21,57 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
+    private val captureStatus = mutableStateOf("স্ক্রিন ক্যাপচার এখনো চালু হয়নি")
+
+    private val captureEvents = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                ScreenCaptureService.ACTION_CAPTURE_STARTED ->
+                    captureStatus.value = "স্ক্রিন ক্যাপচার চালু হয়েছে; প্রথম ফ্রেমের অপেক্ষায়..."
+                ScreenCaptureService.ACTION_FIRST_FRAME ->
+                    captureStatus.value = "স্ক্রিন ক্যাপচার সচল · ফোনের স্ক্রিন থেকে ফ্রেম পাওয়া যাচ্ছে"
+                ScreenCaptureService.ACTION_CAPTURE_ERROR ->
+                    captureStatus.value = "ক্যাপচার চালু হয়নি: " +
+                        (intent.getStringExtra(ScreenCaptureService.EXTRA_ERROR) ?: "অজানা সমস্যা")
+                ScreenCaptureService.ACTION_CAPTURE_STOPPED ->
+                    captureStatus.value = "স্ক্রিন ক্যাপচার বন্ধ"
+            }
+        }
+    }
+
     private val capturePermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            captureStatus.value = "অনুমতি পাওয়া গেছে · ক্যাপচার সার্ভিস চালু হচ্ছে..."
             val service = Intent(this, ScreenCaptureService::class.java).apply {
                 putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, result.data)
             }
-            ContextCompat.startForegroundService(this, service)
+            try {
+                ContextCompat.startForegroundService(this, service)
+            } catch (error: Exception) {
+                captureStatus.value = "সার্ভিস চালু হয়নি: " + (error.message ?: error.javaClass.simpleName)
+            }
+        } else {
+            captureStatus.value = "স্ক্রিন ক্যাপচারের অনুমতি দেওয়া হয়নি"
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter().apply {
+            addAction(ScreenCaptureService.ACTION_CAPTURE_STARTED)
+            addAction(ScreenCaptureService.ACTION_FIRST_FRAME)
+            addAction(ScreenCaptureService.ACTION_CAPTURE_ERROR)
+            addAction(ScreenCaptureService.ACTION_CAPTURE_STOPPED)
+        }
+        ContextCompat.registerReceiver(this, captureEvents, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    override fun onStop() {
+        runCatching { unregisterReceiver(captureEvents) }
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,11 +79,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 TradingHome(
+                    captureStatus = captureStatus.value,
                     onStartCapture = {
+                        captureStatus.value = "Android-এর অনুমতি চাইছে..."
                         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                         capturePermission.launch(manager.createScreenCaptureIntent())
                     },
-                    onStopCapture = { stopService(Intent(this, ScreenCaptureService::class.java)) },
+                    onStopCapture = {
+                        stopService(Intent(this, ScreenCaptureService::class.java))
+                        captureStatus.value = "স্ক্রিন ক্যাপচার বন্ধ করার অনুরোধ পাঠানো হয়েছে"
+                    },
                     onFetch = { key, symbol, callback ->
                         Thread {
                             val result = runCatching { MarketAnalysis.fetchAndAnalyze(key, symbol) }
@@ -55,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun TradingHome(
+    captureStatus: String,
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit,
     onFetch: (String, String, (Result<Analysis>) -> Unit) -> Unit
@@ -62,7 +111,6 @@ private fun TradingHome(
     var platform by remember { mutableStateOf("Quotex") }
     var pair by remember { mutableStateOf("EUR/USD") }
     var apiKey by remember { mutableStateOf("") }
-    var captureState by remember { mutableStateOf("স্ক্রিন বিশ্লেষণের অনুমতি এখনো দেওয়া হয়নি") }
     var result by remember { mutableStateOf<Analysis?>(null) }
     var status by remember { mutableStateOf("Twelve Data API key দিয়ে ১-মিনিটের ক্যান্ডেল বিশ্লেষণ শুরু করুন") }
     var loading by remember { mutableStateOf(false) }
@@ -139,18 +187,16 @@ private fun TradingHome(
         }
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("মোবাইল স্ক্রিন ক্যান্ডেল বিশ্লেষণ", style = MaterialTheme.typography.titleMedium)
-                Text(captureState)
-                Button(onClick = {
-                    onStartCapture()
-                    captureState = "Android-এর screen-sharing permission চাইবে। অনুমতি দিলে capture service চালু হবে।"
-                }, modifier = Modifier.fillMaxWidth()) { Text("স্ক্রিন শেয়ারিং চালু করুন") }
-                OutlinedButton(onClick = {
-                    onStopCapture()
-                    captureState = "স্ক্রিন ক্যাপচার বন্ধ করা হয়েছে"
-                }, modifier = Modifier.fillMaxWidth()) { Text("ক্যাপচার বন্ধ করুন") }
+                Text("মোবাইল স্ক্রিন ক্যাপচার", style = MaterialTheme.typography.titleMedium)
+                Text(captureStatus)
+                Button(onClick = onStartCapture, modifier = Modifier.fillMaxWidth()) {
+                    Text("স্ক্রিন ক্যাপচার চালু করুন")
+                }
+                OutlinedButton(onClick = onStopCapture, modifier = Modifier.fillMaxWidth()) {
+                    Text("ক্যাপচার বন্ধ করুন")
+                }
                 Text(
-                    "এই ধাপে Android screen-capture permission ও frame surface তৈরি হয়েছে। চার্টের ছবি থেকে ক্যান্ডেল শনাক্তকরণ এখনো যুক্ত হয়নি; তাই স্ক্রিন ক্যাপচারকে এখনই সিগন্যাল হিসেবে ব্যবহার করবেন না।",
+                    "এটি আপাতত ফোনের স্ক্রিন স্থানীয়ভাবে ক্যাপচার করে এবং ফ্রেম আসছে কি না দেখায়। অন্য মোবাইলে লাইভ পাঠানো বা Quotex চার্ট থেকে স্বয়ংক্রিয় ক্যান্ডেল শনাক্তকরণ এখনো যুক্ত হয়নি।",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
